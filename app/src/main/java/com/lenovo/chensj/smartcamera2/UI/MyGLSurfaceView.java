@@ -45,9 +45,17 @@ public class MyGLSurfaceView extends GLSurfaceView {
         mRender.setFilterType(mFilterType);
     }
 
+    public FilterType getFilterType() {
+        return mFilterType;
+    }
+
     public MyGLSurfaceView(Context context) {
         super(context);
         init(context);
+        File file = new File(PICTURES_DIRECTORY);
+        if(!file.exists()){
+            file.mkdirs();
+        }
         // TODO Auto-generated constructor stub
     }
 
@@ -132,10 +140,6 @@ public class MyGLSurfaceView extends GLSurfaceView {
 
     public void onPictureTaken(byte[] data, final int Oritention) {
         final Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
-        File file = new File(PICTURES_DIRECTORY);
-        if (!file.exists()) {
-            file.mkdirs();
-        }
         mPicFilePath = PICTURES_DIRECTORY + "/GLCamera"
                 + System.currentTimeMillis() + ".jpeg";
         if (mFilterType == FilterType.None) {

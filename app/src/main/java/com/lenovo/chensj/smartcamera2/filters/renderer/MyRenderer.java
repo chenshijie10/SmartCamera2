@@ -136,7 +136,6 @@ public class MyRenderer implements GLSurfaceView.Renderer,
         }
 		synchronized (this) {
 			if (mUpdateSurface) {
-				 Log.d("CHEN","onDrawFrame updateTexImage");
 				mSurfaceTexture.updateTexImage();
 				GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
 				GLES20.glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
