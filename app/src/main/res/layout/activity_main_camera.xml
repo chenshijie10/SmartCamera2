@@ -5,7 +5,7 @@
     android:layout_height="match_parent"
     tools:context="com.lenovo.chensj.smartcamera2.MainCameraActivity">
 
-    <com.lenovo.chensj.smartcamera2.MyGLSurfaceView
+    <com.lenovo.chensj.smartcamera2.UI.MyGLSurfaceView
         android:id="@+id/camera_preview"
         android:layout_centerInParent="true"
         android:layout_width="match_parent"

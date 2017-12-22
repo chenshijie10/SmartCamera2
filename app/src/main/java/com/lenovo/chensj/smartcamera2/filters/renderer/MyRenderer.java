@@ -10,7 +10,7 @@ import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
 import android.util.Log;
 
-import com.lenovo.chensj.smartcamera2.MyGLSurfaceView;
+import com.lenovo.chensj.smartcamera2.UI.MyGLSurfaceView;
 import com.lenovo.chensj.smartcamera2.filters.BaseFilterDrawer;
 import com.lenovo.chensj.smartcamera2.filters.CameraInputDrawer;
 import com.lenovo.chensj.smartcamera2.filters.FilterFactory;
@@ -21,7 +21,7 @@ public class MyRenderer implements GLSurfaceView.Renderer,
 	private BaseFilterDrawer drawer;
 	private CameraInputDrawer mCameraInputDrawer;
 	private MyGLSurfaceView mGLview;
-	private FilterType mFilterType = FilterType.FreshFilter;
+	private FilterType mFilterType = FilterType.None;
 	public int mSurfaceWidth;
 	public int mSurfaceHeight;
 	private float[] mMMatrix = new float[16];

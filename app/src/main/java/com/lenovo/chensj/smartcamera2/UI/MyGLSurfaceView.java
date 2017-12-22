@@ -1,5 +1,6 @@
-package com.lenovo.chensj.smartcamera2;
+package com.lenovo.chensj.smartcamera2.UI;
 
+import java.io.File;
 import java.nio.IntBuffer;
 
 import android.content.Context;
@@ -10,11 +11,11 @@ import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
-import android.os.AsyncTask;
 import android.os.Environment;
 import android.util.AttributeSet;
 import android.util.Log;
 
+import com.lenovo.chensj.smartcamera2.R;
 import com.lenovo.chensj.smartcamera2.filters.BaseFilterDrawer;
 import com.lenovo.chensj.smartcamera2.filters.FilterFactory;
 import com.lenovo.chensj.smartcamera2.filters.FilterParam;
@@ -27,48 +28,21 @@ public class MyGLSurfaceView extends GLSurfaceView {
     private BaseFilterDrawer drawer;
     private BaseFilterDrawer mCameraInputDrawer;
     public MyRenderer mRender;
-    public FilterType mFilterType = FilterType.FreshFilter;
+    public FilterType mFilterType = FilterType.None;
     float[] mMatrix = new float[16];
     public final static String PICTURES_DIRECTORY = Environment
             .getExternalStorageDirectory().toString() + "/DCIM/" + "UCam";
     private PictureTakenProcessListener mPictureTakenProcess = null;
+    private String mPicFilePath;
 
     public interface PictureTakenProcessListener {
         void FilterPictureTaken(Bitmap bitmap, String Path);
 
-        void FilterPictureSaveDone(Boolean result, String Path);
     }
-
-    ;
 
     public void setFilterType(FilterType filterType) {
         mFilterType = filterType;
         mRender.setFilterType(mFilterType);
-    }
-
-    private class SaveFilterPhoto extends AsyncTask<Bitmap, Integer, Boolean> {
-        String mPicFilePath = null;
-
-        @Override
-        protected Boolean doInBackground(Bitmap... params) {
-            // TODO Auto-generated method stub
-            if (params[0] == null) {
-                return false;
-            }
-            mPicFilePath = PICTURES_DIRECTORY + "/GLCamera"
-                    + System.currentTimeMillis() + ".jpeg";
-            mPictureTakenProcess.FilterPictureTaken(params[0], mPicFilePath);
-            return true;
-        }
-
-        @Override
-        protected void onPostExecute(Boolean result) {
-            // TODO Auto-generated method stub
-            mPictureTakenProcess.FilterPictureSaveDone(result, mPicFilePath);
-            super.onPostExecute(result);
-        }
-
-
     }
 
     public MyGLSurfaceView(Context context) {
@@ -158,6 +132,16 @@ public class MyGLSurfaceView extends GLSurfaceView {
 
     public void onPictureTaken(byte[] data, final int Oritention) {
         final Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+        File file = new File(PICTURES_DIRECTORY);
+        if (!file.exists()) {
+            file.mkdirs();
+        }
+        mPicFilePath = PICTURES_DIRECTORY + "/GLCamera"
+                + System.currentTimeMillis() + ".jpeg";
+        if (mFilterType == FilterType.None) {
+            mPictureTakenProcess.FilterPictureTaken(bitmap, mPicFilePath);
+            return;
+        }
         queueEvent(new Runnable() {
             @Override
             public void run() {
@@ -165,7 +149,7 @@ public class MyGLSurfaceView extends GLSurfaceView {
                 GLES20.glViewport(0, 0, mRender.mSurfaceWidth, mRender.mSurfaceHeight);
                 if (photo != null)
                     Log.d("CHEN_DEBUG", "drawPhoto finish and go to save");
-                new SaveFilterPhoto().execute(photo);
+                mPictureTakenProcess.FilterPictureTaken(photo, mPicFilePath);
             }
         });
     }
