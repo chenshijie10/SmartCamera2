@@ -6,11 +6,13 @@ import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
-import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
+import android.graphics.PointF;
+import android.graphics.Rect;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.hardware.camera2.CameraCharacteristics;
 import android.media.MediaMetadataRetriever;
 import android.support.annotation.ColorInt;
 import android.support.annotation.IntRange;
@@ -18,19 +20,17 @@ import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.Size;
 import android.util.TypedValue;
 import android.view.Display;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.ImageView;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.lang.reflect.Method;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Date;
 
 public class Utils {
@@ -407,27 +407,75 @@ public class Utils {
 			}
 		}
     }
-    
-    /**
-	 * 根据一个网络连接获取bitmap图像
-	 * @param uri
-	 * @return bitmap
-	 */
-	public static Bitmap getBitmap(String uri) {
-		// 显示网络上的图片
-		Bitmap bitmap = null;
-		try {
-			URL url = new URL(uri);
-			HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-			conn.setDoInput(true);
-			conn.connect();
-			InputStream is = conn.getInputStream();
-			bitmap = BitmapFactory.decodeStream(is);
-			is.close();
-		} catch (IOException e) {
-			e.printStackTrace();
-			return null;
+
+	public static PointF convertToWorldCoords(PointF worldLocation, Size viewSize) {
+		//把屏幕坐标变成屏幕中心为坐标原点的世界坐标，方便缩放变化。
+		android.graphics.Matrix offset = new android.graphics.Matrix();
+		offset.postTranslate((float) viewSize.getWidth() / -2f, (float) viewSize.getHeight() / 2f);
+		offset.preScale(1f, -1f);
+
+		float[] src = new float[] {worldLocation.x, worldLocation.y};
+		float[] dst = new float[2];
+		offset.mapPoints(dst, src);
+
+		Log.d(TAG, "convertToTouchCoords viewSize:" + viewSize
+					+ " src:"+ Arrays.toString(src)
+					+ " dst:" + Arrays.toString(dst));
+
+		return new PointF(dst[0], dst[1]);
+	}
+
+	public static PointF convertToSensorCoords(Rect activeRect, PointF worldCoord, Size viewSize) {
+		Matrix matrix = new Matrix();
+		//todo mirror
+		boolean mirror = false;
+		matrix.setScale(-1, mirror ? -1 : 1);
+		//对中心为坐标零点的坐标进行缩放，并平移到左上角。
+		matrix.postRotate(
+				90);
+
+		matrix.postScale(activeRect.width() / viewSize.getHeight(),
+				activeRect.height() / viewSize.getWidth());
+		matrix.postTranslate(activeRect.left + activeRect.width() / 2,
+				activeRect.top + activeRect.height() / 2);
+
+		float[] src = new float[]{worldCoord.x, worldCoord.y};
+		float[] dst = new float[2];
+
+		matrix.mapPoints(dst, src);
+		PointF result = new PointF(dst[0], dst[1]);
+		Log.d(TAG, "convertToSensorCoords wl:" + worldCoord +
+				" cl:" + result +
+				" pr:" + worldCoord +
+				" sr:" + activeRect);
+		return result;
+	}
+
+	//todo 把比例、zoom应用到计算sensor有效区域中
+	public static Rect getActiveSensorRect(CameraCharacteristics cameraCharacteristic, Size viewSize) {
+		//Active sensor rect
+		Rect activeRect = cameraCharacteristic.get(
+						CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+
+		float aspectRatio = viewSize.getWidth() * 1.f / viewSize.getHeight();
+
+		int zoomValue =  1;
+		int width, height, wWidth, wHeight, hWidth, hHeight;
+		hHeight = (int) (activeRect.height() * zoomValue);
+		hWidth = (int) (aspectRatio * hHeight);
+		wWidth = (int) (activeRect.width() * zoomValue);
+		wHeight = (int) (wWidth / aspectRatio);
+		if (hWidth < activeRect.width()) {
+			width = hWidth;
+			height = hHeight;
+		} else {
+			width = wWidth;
+			height = wHeight;
 		}
-		return bitmap;
+
+		return new Rect((activeRect.width() - width) / 2,
+				(activeRect.height() - height) / 2,
+				(activeRect.width() + width) / 2,
+				(activeRect.height() + height) / 2);
 	}
 }

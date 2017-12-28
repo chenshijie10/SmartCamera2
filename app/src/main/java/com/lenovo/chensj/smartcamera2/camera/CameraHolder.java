@@ -4,6 +4,9 @@ import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
+import android.graphics.Point;
+import android.graphics.PointF;
+import android.graphics.Rect;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -15,6 +18,7 @@ import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.InputConfiguration;
+import android.hardware.camera2.params.MeteringRectangle;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
@@ -24,6 +28,8 @@ import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
+
+import com.lenovo.chensj.smartcamera2.Utils;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -54,6 +60,9 @@ public class CameraHolder {
     private ImageReader mFullYuvImageReader;
     private ImageReader mJpegImageReader;
 
+    public static final MeteringRectangle[] DEFAULT_ROI_RECT = new MeteringRectangle[]{
+            new MeteringRectangle(0, 0, 0, 0, 0)};
+
     public interface PictureAvailableListener{
         void onPictureTaken(byte[] date);
     }
@@ -83,7 +92,11 @@ public class CameraHolder {
         }
     };
 
-    private class ReprocCaptureCallback extends CameraCaptureSession.CaptureCallback {
+    private class ReprocCaptureCallback extends AutoFocusStatesDealer {
+
+        public ReprocCaptureCallback(AutoFocusStateListener stateListener) {
+            super(stateListener);
+        }
         @Override
         public void onCaptureStarted(@NonNull CameraCaptureSession session, @NonNull
                 CaptureRequest request, long timestamp, long frameNumber) {
@@ -160,7 +173,8 @@ public class CameraHolder {
         this.mCameraCaptureSession = mCameraCaptureSession;
     }
 
-    public void OpenCamera(String cameraId, final Surface previewSurface, Size pictureSize) {
+    public void OpenCamera(String cameraId, final Surface previewSurface, Size pictureSize,
+                           final AutoFocusStatesDealer.AutoFocusStateListener listener) {
         if(mJpegImageReader == null || mJpegImageReader.getWidth() != pictureSize.getWidth()
                 || mJpegImageReader.getHeight() != pictureSize.getHeight()){
             if(mJpegImageReader != null){
@@ -189,7 +203,7 @@ public class CameraHolder {
                 @Override
                 public void onOpened(@NonNull CameraDevice camera) {
                     mCameraDevice = camera;
-                    startPreview(camera, previewSurface);
+                    startPreview(camera, previewSurface, listener);
                 }
 
                 @Override
@@ -251,7 +265,7 @@ public class CameraHolder {
         return false;
     }
 
-    public void startPreview(CameraDevice camera, Surface previewSurface) {
+    public void startPreview(CameraDevice camera, Surface previewSurface, final AutoFocusStatesDealer.AutoFocusStateListener listener) {
         try {
             mPreviewRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             mPreviewRequestBuilder.addTarget(previewSurface);
@@ -278,7 +292,7 @@ public class CameraHolder {
                                 try {
                                     mCameraCaptureSession.setRepeatingRequest
                                             (mPreviewRequestBuilder.build(),
-                                                    new ReprocCaptureCallback(),
+                                                    new ReprocCaptureCallback(listener),
                                                     mBackgroundHandler);
                                 } catch (CameraAccessException e) {
                                     e.printStackTrace();
@@ -307,8 +321,8 @@ public class CameraHolder {
                                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
                                 CaptureRequest previewRequest = mPreviewRequestBuilder.build();
                                 try {
-                                    mCameraCaptureSession.setRepeatingRequest(previewRequest, new
-                                            CameraCaptureSession.CaptureCallback() {
+                                    mCameraCaptureSession.setRepeatingRequest(previewRequest,
+                                            new AutoFocusStatesDealer(listener) {
                                             }, mBackgroundHandler);
                                 } catch (CameraAccessException e) {
                                     e.printStackTrace();
@@ -330,6 +344,102 @@ public class CameraHolder {
     public void takePicture(PictureAvailableListener listener){
         mPictureAvailableListener = listener;
         lockFocus(true);
+    }
+
+    public void resetRegins(final AutoFocusStatesDealer.AutoFocusStateListener listener){
+        applyRoi(mPreviewRequestBuilder, DEFAULT_ROI_RECT, DEFAULT_ROI_RECT);
+        try {
+            mCameraCaptureSession.setRepeatingRequest(mPreviewRequestBuilder.build(),
+                    new ReprocCaptureCallback(listener), mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void autoFocus(final AutoFocusStatesDealer.AutoFocusStateListener listener, Point touchPoint,
+                          Size viewSize) {
+        mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest
+                .CONTROL_AF_TRIGGER_START);
+        final MeteringRectangle[] regions = getRegions(new PointF(touchPoint), 100, 100, viewSize);
+        applyRoi(mPreviewRequestBuilder, regions, regions);
+        mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO);
+        mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START);
+        mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CameraMetadata.CONTROL_AE_PRECAPTURE_TRIGGER_START);
+        try {
+            mCameraCaptureSession.setRepeatingRequest(mPreviewRequestBuilder.build(), new AutoFocusStatesDealer(new AutoFocusStatesDealer.AutoFocusStateListener() {
+
+                        @Override
+                        public void onAutoFocusSuccess(CaptureResult result, boolean locked) {
+                            listener.onAutoFocusSuccess(result, locked);
+                            cancelAutoFocus(listener);
+                        }
+
+                        @Override
+                        public void onAutoFocusFail(CaptureResult result, boolean locked) {
+                            listener.onAutoFocusFail(result, locked);
+                            cancelAutoFocus(listener);
+                        }
+
+                        @Override
+                        public void onAutoFocusScan(CaptureResult result) {
+                            listener.onAutoFocusScan(result);
+                        }
+
+                        @Override
+                        public void onAutoFocusInactive(CaptureResult result) {
+                            listener.onAutoFocusInactive(result);
+                        }
+
+                        @Override
+                        public void onManualFocusCompleted(CaptureResult result) {
+                            listener.onManualFocusCompleted(result);
+                        }
+                    }),
+                    mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void cancelAutoFocus(AutoFocusStatesDealer.AutoFocusStateListener listener) {
+        mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
+        mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
+        mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+
+        try {
+            mCameraCaptureSession.setRepeatingRequest(mPreviewRequestBuilder.build(),
+                    new ReprocCaptureCallback(listener), mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            Log.e(TAG, "setRepeatingRequest failed, errMsg: " + e.getMessage());
+        }
+    }
+
+    private MeteringRectangle[] getRegions(PointF touchPoint, int regionsW, int regionsH, Size viewSize) {
+        Rect activeRect = getCameraCharacteristics(mCameraId).get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+        Log.d("DEBUG_CODE","activeRect = "+activeRect.toString());
+        PointF worldCoord = Utils.convertToWorldCoords(touchPoint, viewSize);
+        PointF sensorCoord = Utils.convertToSensorCoords(Utils.getActiveSensorRect(getCameraCharacteristics(mCameraId), viewSize),
+                worldCoord, viewSize);
+        int width = Math.abs(regionsW * activeRect.width() / viewSize.getWidth());
+        int height = Math.abs(regionsH * activeRect.height() / viewSize.getHeight());
+        int rectX = Math.min(Math.max(activeRect.left + width/2, (int)sensorCoord.x), activeRect.right - width/2);
+        int rectY = Math.min(Math.max(activeRect.top + height/2, (int)sensorCoord.y), activeRect.bottom - height/2);
+        int weight = 1;
+        MeteringRectangle[] rectangles = new MeteringRectangle[]{new MeteringRectangle(rectX, rectY,
+                width, height, weight)};
+        return rectangles;
+    }
+
+    public void applyRoi(CaptureRequest.Builder builder, MeteringRectangle[] aeRegions,
+                         MeteringRectangle[] afRegions) {
+        if (getCameraCharacteristics(mCameraId).get(
+                CameraCharacteristics.CONTROL_MAX_REGIONS_AE) > 0) {
+            builder.set(CaptureRequest.CONTROL_AE_REGIONS, aeRegions);
+        }
+        if (getCameraCharacteristics(mCameraId).get(
+                CameraCharacteristics.CONTROL_MAX_REGIONS_AF) > 0) {
+            builder.set(CaptureRequest.CONTROL_AF_REGIONS, afRegions);
+        }
     }
 
     public void lockFocus(final boolean Capture) {

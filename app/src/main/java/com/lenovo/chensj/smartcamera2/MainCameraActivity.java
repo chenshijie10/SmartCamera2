@@ -5,10 +5,13 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
+import android.graphics.Point;
+import android.graphics.PointF;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.os.Handler;
@@ -20,6 +23,7 @@ import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.Size;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
@@ -28,6 +32,8 @@ import android.widget.RelativeLayout;
 import android.widget.Toast;
 
 import com.lenovo.chensj.smartcamera2.UI.MyGLSurfaceView;
+import com.lenovo.chensj.smartcamera2.UI.RoiView;
+import com.lenovo.chensj.smartcamera2.camera.AutoFocusStatesDealer;
 import com.lenovo.chensj.smartcamera2.camera.CameraHolder;
 import com.lenovo.chensj.smartcamera2.filters.FilterType;
 import com.lenovo.chensj.smartcamera2.filters.renderer.MyRenderer;
@@ -47,8 +53,11 @@ public class MainCameraActivity extends AppCompatActivity implements View.OnClic
     private Handler mBackgroundHandler;
     private HandlerThread mBackgroundThread;
 
+    private Handler mUIHandler = new Handler();
+
     private CameraHolder mCameraHolder;
     private Size mPictureSize;
+    private Size mViewSize;
 
     //settings
     private CameraCharacteristics mCameraCharacteristics;
@@ -59,12 +68,78 @@ public class MainCameraActivity extends AppCompatActivity implements View.OnClic
     private ImageView mShutterBtn;
     private ImageView mModeListBtn;
     private ImageView mGalleryBtn;
+    private RoiView mRoiView;
     private Surface mPreviewSurface = null;
+
+    private AutoFocusStatesDealer.AutoFocusStateListener mAutoFocusStateListener = new AutoFocusStatesDealer.AutoFocusStateListener() {
+
+        @Override
+        public void onAutoFocusSuccess(CaptureResult result, boolean locked) {
+            mUIHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    mRoiView.setFocusState(RoiView.FocusStates.FOCUSED_LOCKED);
+                }
+            });
+        }
+
+        @Override
+        public void onAutoFocusFail(CaptureResult result, boolean locked) {
+            mUIHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    mRoiView.setFocusState(RoiView.FocusStates.NOT_FOCUSED_LOCKED);
+                }
+            });
+        }
+
+        @Override
+        public void onAutoFocusScan(CaptureResult result) {
+            mUIHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    mRoiView.setFocusState(RoiView.FocusStates.PASSIVE_SCAN);
+                }
+            });
+        }
+
+        @Override
+        public void onAutoFocusInactive(CaptureResult result) {
+            mUIHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    mRoiView.setFocusState(RoiView.FocusStates.INACTIVE);
+                }
+            });
+        }
+
+        @Override
+        public void onManualFocusCompleted(CaptureResult result) {
+            mUIHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    mRoiView.setFocusMode(RoiView.FocusMode.Continous_picture);
+                    mRoiView.setFocusState(RoiView.FocusStates.FOCUSED_LOCKED);
+                }
+            });
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main_camera);
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        Log.d("DEBUG_CODE","onTouchEvent event x = "+event.getX()
+                + "y = "+event.getY());
+        mRoiView.setFocusMode(RoiView.FocusMode.Auto);
+        mRoiView.setFocusPoints(new PointF[]{new PointF(event.getX(), event.getY())});
+        mCameraHolder.autoFocus(mAutoFocusStateListener, new Point((int)event.getX(), (int)event.getY()),
+                new Size(1080, 1920));
+        return super.onTouchEvent(event);
     }
 
     @Override
@@ -125,6 +200,19 @@ public class MainCameraActivity extends AppCompatActivity implements View.OnClic
         mModeListBtn.setOnClickListener(this);
         mGalleryBtn = (ImageView) findViewById(R.id.gallery_btn);
         mGalleryBtn.setOnClickListener(this);
+        mRoiView = (RoiView) findViewById(R.id.roi_view);
+        mRoiView.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if(mCameraHolder != null){
+                    mRoiView.setFocusMode(RoiView.FocusMode.Continous_picture);
+                    mRoiView.setVisibility(View.INVISIBLE);
+                    mRoiView.setFocusPoints(new PointF[]{new PointF(mViewSize.getWidth() / 2.f,
+                            mViewSize.getHeight() / 2.f)});
+                    mCameraHolder.resetRegins(mAutoFocusStateListener);
+                }
+            }
+        });
         setupPictureSize();
     }
 
@@ -179,7 +267,7 @@ public class MainCameraActivity extends AppCompatActivity implements View.OnClic
             if(mPreviewSurface == null) {
                 initViews();
             } else {
-                mCameraHolder.OpenCamera(mCameraId, mPreviewSurface, mPictureSize);
+                mCameraHolder.OpenCamera(mCameraId, mPreviewSurface, mPictureSize, mAutoFocusStateListener);
             }
         }
         super.onResume();
@@ -209,7 +297,7 @@ public class MainCameraActivity extends AppCompatActivity implements View.OnClic
     public void onSurfaceTextureCreated(SurfaceTexture surfaceTexture) {
         surfaceTexture.setDefaultBufferSize(Utils.getScreenHeight(), Utils.getScreenWidth());
         mPreviewSurface = new Surface(surfaceTexture);
-        mCameraHolder.OpenCamera(mCameraId, mPreviewSurface, mPictureSize);
+        mCameraHolder.OpenCamera(mCameraId, mPreviewSurface, mPictureSize, mAutoFocusStateListener);
     }
 
     private void measureParam(int previewWidth, int previewHeight) {
@@ -222,7 +310,7 @@ public class MainCameraActivity extends AppCompatActivity implements View.OnClic
         Log.d(TAG, "measureParam(): scale.WH is (" + scaleW + ", " + scaleH
                 + "), scale is " + scale + ", View.WH is (" + viewWidth + ", "
                 + viewHeight + ");");
-
+        mViewSize = new Size(viewWidth, viewHeight);
         ViewGroup.LayoutParams params = mGLSurfaceView.getLayoutParams();
         params.width = viewWidth;
         params.height = viewHeight;
